@@ -6,9 +6,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../")))
 
 from segmentation_models_pytorch import MAnet
 from segmentation_models_pytorch.base.modules import Activation
+from segmentation_models_pytorch.base import ClassificationHead
 
 __all__ = ["MEDIARFormer"]
 
+DEFAULT_AUX_CLASSIFICATION_CONFIG = dict(
+    pooling = 'avg',
+    dropout = 0.5,
+    activation = 'sigmoid',
+    classes = 2
+)
 
 class MEDIARFormer(MAnet):
     """MEDIAR-Former Model"""
@@ -20,7 +27,8 @@ class MEDIARFormer(MAnet):
         decoder_channels=(1024, 512, 256, 128, 64),
         decoder_pab_channels=256,
         in_channels=3,
-        classes=3,
+        classes=5,
+        
     ):
         super(MEDIARFormer, self).__init__(
             encoder_name=encoder_name,
@@ -33,7 +41,7 @@ class MEDIARFormer(MAnet):
 
         # Delete MAnet Head
         self.segmentation_head = None
-
+        self.aux_params = DEFAULT_AUX_CLASSIFICATION_CONFIG
         # Convert all Encoder/Decoder activations to 0
         convert_relu_to_mish(self.encoder)
         convert_relu_to_mish(self.decoder)
@@ -41,8 +49,13 @@ class MEDIARFormer(MAnet):
         self.cellprob_head = DeepSegmantationHead(
             in_channels=decoder_channels[-1], out_channels=1, kernel_size=3,
         )
+
         self.gradflow_head = DeepSegmantationHead(
             in_channels=decoder_channels[-1], out_channels=2, kernel_size=3,
+        )
+
+        self.classification_head = ClassificationHead(
+            in_channels=self.encoder.out_channels[-1], **self.aux_params
         )
 
     def forward(self, x):
@@ -56,6 +69,13 @@ class MEDIARFormer(MAnet):
         cellprob_mask = self.cellprob_head(decoder_output)
 
         masks = torch.cat([gradflow_mask, cellprob_mask], dim=1)
+        
+        # Generate labels from classification head if it presents
+        if self.classification_head is not None:
+            labels = self.classification_head(features[-1])
+            return masks, labels
+
+        
 
         return masks
 

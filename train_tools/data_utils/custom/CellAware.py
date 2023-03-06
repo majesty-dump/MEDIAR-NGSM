@@ -63,6 +63,8 @@ class IntensityDiversification(MapTransform):
 
     def __call__(self, data):
         # Select cells to be transformed
+        print("label shape : ", data["label"].shape)
+        
         cell_count = int(data["label"].max())
         change_cell_count = int(cell_count * self.change_cell_ratio)
         change_cell = np.random.choice(cell_count, change_cell_count, replace=False)

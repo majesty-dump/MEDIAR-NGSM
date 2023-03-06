@@ -145,7 +145,7 @@ class UnifiedITKReader(NumpyReader):
                     _obj = itk.array_view_from_image(_obj, keep_axes=False)
                 except:
                     _obj = io.imread(name)
-
+        print(f"Loading image {name} with shape = {_obj.shape}")
             if len(_obj.shape) == 2:
                 _obj = np.repeat(np.expand_dims(_obj, axis=-1), 3, axis=-1)
             elif len(_obj.shape) == 3 and _obj.shape[-1] > 3:

@@ -12,6 +12,28 @@ from core.MEDIAR.utils import *
 
 __all__ = ["Trainer"]
 
+# rework dataloader to get different class members from tif layers 
+def classcount(loader):
+    n_train = len(loader)
+
+    class_weight = np.array([0.0,0.0])
+
+    with tqdm(total=n_train, desc='Class Count Assessment', unit='batch', disable = False, leave=True) as pbar:
+        for batch in loader:
+            imgs, true_masks = batch['image'], batch['mask']
+            (unique, counts) = np.unique(true_masks, return_counts=True)
+            frequencies = np.asarray((unique, counts))
+            # print(frequencies.shape)
+            for i in range(frequencies.shape[1]):
+                class_weight[frequencies[0,i]] += frequencies[1,i]
+            pbar.update()
+
+    # print(class_weight)
+    class_weight = class_weight[:-1].min()/class_weight
+    class_weight[-1]=0
+
+    return class_weight
+
 
 class Trainer(BaseTrainer):
     def __init__(
@@ -44,8 +66,13 @@ class Trainer(BaseTrainer):
 
         self.mse_loss = nn.MSELoss(reduction="mean")
         self.bce_loss = nn.BCEWithLogitsLoss(reduction="mean")
+        
+        weights_classes = torch.from_numpy(classcount(dataloaders["train"]))
+        weights_classes = weights_classes.to(device=device, dtype=torch.float32)
+        
+        self.classification_loss = nn.CrossEntropyLoss(weight = weights_classes)
 
-    def mediar_criterion(self, outputs, labels_onehot_flows):
+    def mediar_criterion(self, outputs, labels_onehot_flows, pred_label, gt_label):
         """loss function between true labels and prediction outputs"""
 
         # Cell Recognition Loss
@@ -57,6 +84,7 @@ class Trainer(BaseTrainer):
         # Cell Distinction Loss
         gradient_flows = torch.from_numpy(labels_onehot_flows[:, 2:]).to(self.device)
         gradflow_loss = 0.5 * self.mse_loss(outputs[:, :2], 5.0 * gradient_flows)
+        classification_loss = self.classification_loss(pred_label, gt_label)
 
         loss = cellprob_loss + gradflow_loss
 
@@ -97,14 +125,20 @@ class Trainer(BaseTrainer):
             with torch.cuda.amp.autocast(enabled=self.amp):
                 with torch.set_grad_enabled(phase == "train"):
                     # Output shape is B x [grad y, grad x, cellprob] x H x W
-                    outputs = self._inference(images, phase)
+                    class_label = None
+
+                    if self.model.classification_head is not None:
+                        outputs, class_label = self._inference(images, phase)
+                        print(class_label)
+                    else:
+                        outputs = self._inference(images, phase)
 
                     # Map label masks to graidnet and onehot
                     labels_onehot_flows = labels_to_flows(
                         labels, use_gpu=True, device=self.device
                     )
                     # Calculate loss
-                    loss = self.mediar_criterion(outputs, labels_onehot_flows)
+                    loss = self.mediar_criterion(outputs, labels_onehot_flows, class_label, labels)
                     self.loss_metric.append(loss)
 
                     # Calculate valid statistics
