@@ -139,12 +139,16 @@ class UnifiedITKReader(NumpyReader):
 
             if name.endswith(".tif") or name.endswith(".tiff"):
                 _obj = tif.imread(name)
+                _obj = np.swapaxes(_obj,0,2)
+                _obj = np.swapaxes(_obj,0,1)
             else:
                 try:
                     _obj = itk.imread(name, **kwargs_)
                     _obj = itk.array_view_from_image(_obj, keep_axes=False)
                 except:
                     _obj = io.imread(name)
+            
+            
             print(f"Loading image {name} with shape = {_obj.shape}")
             if len(_obj.shape) == 2:
                 _obj = np.repeat(np.expand_dims(_obj, axis=-1), 3, axis=-1)
