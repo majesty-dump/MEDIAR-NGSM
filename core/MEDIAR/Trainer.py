@@ -69,7 +69,7 @@ class Trainer(BaseTrainer):
         
         weights_classes = torch.from_numpy(classcount(dataloaders["train"]))
         weights_classes = weights_classes.to(device=device, dtype=torch.float32)
-        
+
         self.classification_loss = nn.CrossEntropyLoss(weight = weights_classes)
 
     def mediar_criterion(self, outputs, labels_onehot_flows, pred_label, gt_label):
@@ -84,9 +84,12 @@ class Trainer(BaseTrainer):
         # Cell Distinction Loss
         gradient_flows = torch.from_numpy(labels_onehot_flows[:, 2:]).to(self.device)
         gradflow_loss = 0.5 * self.mse_loss(outputs[:, :2], 5.0 * gradient_flows)
-        classification_loss = self.classification_loss(pred_label, gt_label)
+        classification_loss = 0
+        
+        if class_label is not None:
+            classification_loss = self.classification_loss(pred_label, gt_label)
 
-        loss = cellprob_loss + gradflow_loss
+        loss = cellprob_loss + gradflow_loss + classification_loss
 
         return loss
 

@@ -1,15 +1,15 @@
 {
     "data_setups":{
         "labeled":{
-            "root": "/home/gihun/data/CellSeg/",
+            "root": "/home/majesty-dump/datasets/NGSM-dataset/",
             "mapping_file": "./train_tools/data_utils/mapping_labeled.json",
-            "mapping_file_tuning": "/home/gihun/CellSeg/train_tools/data_utils/mapping_tuning.json",
-            "amplified": true,
-            "batch_size": 8, 
-            "valid_portion": 0.0
+            "mapping_file_tuning": "/home/majesty-dump/Documents/MEDIAR/train_tools/data_utils/mapping_tuning.json",
+            "amplified": false,
+            "batch_size": 2, 
+            "valid_portion": 0.3
         },
         "public":{
-            "enabled": true,
+            "enabled": false,
             "params":{
                 "root": "/home/gihun/data/CellSeg/",
                 "mapping_file": "./train_tools/data_utils/mapping_public.json",
@@ -23,7 +23,14 @@
     "train_setups":{
         "model":{
             "name": "mediar-former",
-            "params": {},
+            "params": {        
+                "encoder_name": "mit_b5",
+                "encoder_weights": "imagenet",
+                "decoder_channels": [1024, 512, 256, 128, 64],
+                "decoder_pab_channels": 256,
+                "in_channels": 3,
+                "classes": 5
+        	},
             "pretrained":{
                 "enabled": true,
                 "weights": "./weights/pretrained/phase2.pth",
@@ -37,7 +44,7 @@
                 "valid_frequency": 1,
                 "device": "cuda:0",
                 "amp": true,
-                "algo_params": {"with_public": true}
+                "algo_params": {"with_public": false}
             }
         },
         "optimizer":{
@@ -52,10 +59,10 @@
         "seed": 19940817
     },
     "pred_setups":{
-        "input_path":"/home/gihun/data/CellSeg/Official/TuningSet",
-        "output_path": "./results/from_phase2",
+        "input_path":"/home/majesty-dump/datasets/NGSM-Tuning",
+        "output_path": "./results/from_phase0603",
         "make_submission": true,
-        "exp_name": "mediar_from_phase2",
+        "exp_name": "mediar_from_phase34",
         "algo_params": {"use_tta": false}
     },
     "wandb_setups":{
