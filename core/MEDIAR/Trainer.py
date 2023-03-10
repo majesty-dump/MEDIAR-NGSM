@@ -4,6 +4,8 @@ import numpy as np
 import os, sys
 from tqdm import tqdm
 from monai.inferers import sliding_window_inference
+from monai.metrics import CumulativeAverage
+import segmentation_models_pytorch as smp
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../")))
 
@@ -11,29 +13,8 @@ from core.BaseTrainer import BaseTrainer
 from core.MEDIAR.utils import *
 
 __all__ = ["Trainer"]
-
-# rework dataloader to get different class members from tif layers 
-def classcount(loader):
-    n_train = len(loader)
-
-    class_weight = np.array([0.0,0.0])
-
-    with tqdm(total=n_train, desc='Class Count Assessment', unit='batch', disable = False, leave=True) as pbar:
-        for batch in loader:
-            imgs, true_masks = batch['image'], batch['mask']
-            (unique, counts) = np.unique(true_masks, return_counts=True)
-            frequencies = np.asarray((unique, counts))
-            # print(frequencies.shape)
-            for i in range(frequencies.shape[1]):
-                class_weight[frequencies[0,i]] += frequencies[1,i]
-            pbar.update()
-
-    # print(class_weight)
-    class_weight = class_weight[:-1].min()/class_weight
-    class_weight[-1]=0
-
-    return class_weight
-
+UNDEFINED_LABEL_INDEX = 4
+BACKGROUND_LABEL_INDEX = 0
 
 class Trainer(BaseTrainer):
     def __init__(
@@ -66,32 +47,26 @@ class Trainer(BaseTrainer):
 
         self.mse_loss = nn.MSELoss(reduction="mean")
         self.bce_loss = nn.BCEWithLogitsLoss(reduction="mean")
-        
-        weights_classes = torch.from_numpy(classcount(dataloaders["train"]))
-        weights_classes = weights_classes.to(device=device, dtype=torch.float32)
+        self.dice_loss = smp.losses.DiceLoss(mode="multiclass", from_logits=True, ignore_index=0)
 
-        self.classification_loss = nn.CrossEntropyLoss(weight = weights_classes)
+        self.mse_loss_metric = CumulativeAverage()
+        self.bce_loss_metric = CumulativeAverage()
+        self.class_segm_metric = CumulativeAverage()
 
-    def mediar_criterion(self, outputs, labels_onehot_flows, pred_label, gt_label):
+    def mediar_criterion(self, outputs, labels_onehot_flows, class_labels):
         """loss function between true labels and prediction outputs"""
 
         # Cell Recognition Loss
         cellprob_loss = self.bce_loss(
-            outputs[:, -1],
+            outputs[0][:, -1],
             torch.from_numpy(labels_onehot_flows[:, 1] > 0.5).to(self.device).float(),
         )
 
         # Cell Distinction Loss
         gradient_flows = torch.from_numpy(labels_onehot_flows[:, 2:]).to(self.device)
-        gradflow_loss = 0.5 * self.mse_loss(outputs[:, :2], 5.0 * gradient_flows)
-        classification_loss = 0
-        
-        if class_label is not None:
-            classification_loss = self.classification_loss(pred_label, gt_label)
-
-        loss = cellprob_loss + gradflow_loss + classification_loss
-
-        return loss
+        gradflow_loss = 0.5 * self.mse_loss(outputs[0][:, :2], 5.0 * gradient_flows)
+        class_segm_loss = self.dice_loss(outputs[1], class_labels.long())
+        return cellprob_loss, gradflow_loss, class_segm_loss
 
     def _epoch_phase(self, phase):
         phase_results = {}
@@ -101,8 +76,7 @@ class Trainer(BaseTrainer):
 
         # Epoch process
         for batch_data in tqdm(self.dataloaders[phase]):
-            images, labels = batch_data["img"], batch_data["label"]
-
+            images, labels, class_labels = batch_data["img"], batch_data["label"], batch_data["class"]
             if self.with_public:
                 # Load batches sequentially from the unlabeled dataloader
                 try:
@@ -121,6 +95,7 @@ class Trainer(BaseTrainer):
 
             images = images.to(self.device)
             labels = labels.to(self.device)
+            class_labels = class_labels.to(self.device)
 
             self.optimizer.zero_grad()
 
@@ -128,26 +103,25 @@ class Trainer(BaseTrainer):
             with torch.cuda.amp.autocast(enabled=self.amp):
                 with torch.set_grad_enabled(phase == "train"):
                     # Output shape is B x [grad y, grad x, cellprob] x H x W
-                    class_label = None
 
-                    if self.model.classification_head is not None:
-                        outputs, class_label = self._inference(images, phase)
-                        print(class_label)
-                    else:
-                        outputs = self._inference(images, phase)
+                    outputs = self._inference(images, phase)
 
                     # Map label masks to graidnet and onehot
                     labels_onehot_flows = labels_to_flows(
                         labels, use_gpu=True, device=self.device
                     )
                     # Calculate loss
-                    loss = self.mediar_criterion(outputs, labels_onehot_flows, class_label, labels)
+                    bce, mse, dl = self.mediar_criterion(outputs, labels_onehot_flows, class_labels)
+                    loss = bce+mse+dl
+                    self.bce_loss_metric.append(bce)
+                    self.mse_loss_metric.append(mse)
+                    self.class_segm_metric.append(dl)
                     self.loss_metric.append(loss)
 
                     # Calculate valid statistics
                     if phase != "train":
-                        outputs, labels = self._post_process(outputs, labels)
-                        f1_score = self._get_f1_metric(outputs, labels)
+                        outputs, labels = self._post_process(outputs[0], labels)
+                        f1_score = self._get_f1_metric(outputs[0], labels)
                         self.f1_metric.append(f1_score)
 
                 # Backward pass
@@ -164,9 +138,18 @@ class Trainer(BaseTrainer):
                         self.optimizer.step()
 
         # Update metrics
-        phase_results = self._update_results(
-            phase_results, self.loss_metric, "dice_loss", phase
-        )
+        phase_results = self._update_results(phase_results, 
+            self.mse_loss_metric, "bce", phase)
+
+        phase_results = self._update_results(phase_results, 
+            self.mse_loss_metric, "mse", phase)
+
+        phase_results = self._update_results(phase_results, 
+            self.mse_loss_metric, "dl", phase)
+
+        phase_results = self._update_results(phase_results, 
+            self.loss_metric, "loss", phase)
+        
         if phase != "train":
             phase_results = self._update_results(
                 phase_results, self.f1_metric, "f1_score", phase
@@ -180,7 +163,7 @@ class Trainer(BaseTrainer):
         if phase != "train":
             outputs = sliding_window_inference(
                 images,
-                roi_size=512,
+                roi_size=256,
                 sw_batch_size=4,
                 predictor=self.model,
                 padding_mode="constant",
@@ -189,7 +172,7 @@ class Trainer(BaseTrainer):
             )
         else:
             outputs = self.model(images)
-
+            # print(f"Current phase outputs : {outputs}")
         return outputs
 
     def _post_process(self, outputs, labels=None):
