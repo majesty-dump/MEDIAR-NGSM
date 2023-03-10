@@ -31,24 +31,32 @@ def public_paths_labeled(root):
 def official_paths_labeled(root):
     """Map paths for official labeled datasets as dictionary list"""
 
-    image_path = os.path.join(root, "Official/Train_Labeled/images/*")
-    label_path = os.path.join(root, "Official/Train_Labeled/labels/*")
 
+    image_path = "/home/majesty-dump/datasets/NGSM-Main/images/*"
+    label_path = "/home/majesty-dump/datasets/NGSM-Main/labels/*"
+    class_path = "/home/majesty-dump/datasets/NGSM-Main/class_labels/*"
+
+    
     images_raw = sorted(glob.glob(image_path))
     labels_raw = sorted(glob.glob(label_path))
+    class_labels_raw = sorted(glob.glob(class_path))
 
     data_dicts = []
 
-    for image_path, label_path in zip(images_raw, labels_raw):
+    for image_path, label_path, class_label_path in zip(images_raw, labels_raw, class_labels_raw):
         name1 = image_path.split("/")[-1].split(".")[0]
         name2 = label_path.split("/")[-1].split("_label")[0]
+        name3 = class_label_path.split("/")[-1].split("_class")[0]
+        print(name1, name2, name3)
         assert name1 == name2
-
+        assert name2 == name3
+        print(image_path.split("NGSM-Main/")[-1])
         data_item = {
-            "img": image_path.split("CellSeg/")[-1],
-            "label": label_path.split("CellSeg/")[-1],
+            "img": image_path.split("NGSM-Main/")[-1],
+            "label": label_path.split("NGSM-Main/")[-1],
+            "class": class_label_path.split("NGSM-Main/")[-1]
         }
-
+        
         data_dicts.append(data_item)
 
     map_dict = {"official": data_dicts}
@@ -59,13 +67,13 @@ def official_paths_labeled(root):
 def official_paths_tuning(root):
     """Map paths for official tuning datasets as dictionary list"""
 
-    image_path = os.path.join(root, "Official/TuningSet/*")
+    image_path = "/home/majesty-dump/datasets/NGSM-Tuning/*"
     images_raw = sorted(glob.glob(image_path))
 
     data_dicts = []
 
     for image_path in images_raw:
-        data_item = {"img": image_path.split("CellSeg/")[-1]}
+        data_item = {"img": image_path.split("NGSM-Tuning/")[-1]}
         data_dicts.append(data_item)
 
     map_dict = {"official": data_dicts}
@@ -84,7 +92,7 @@ def add_mapping_to_json(json_file, map_dict):
         data = json.load(file)
 
     for map_key, map_item in map_dict.items():
-        if map_key not in data.keys():
+        if map_key not in data.keys(): 
             data[map_key] = map_item
         else:
             print('>>> "{}" already exists in path map keys...'.format(map_key))
@@ -96,9 +104,9 @@ def add_mapping_to_json(json_file, map_dict):
 if __name__ == "__main__":
     # [!Caution] The paths should be overrided for the local environment!
     parser = argparse.ArgumentParser(description="Mapping files and paths")
-    parser.add_argument("--root", default=".", type=str)
+    parser.add_argument("--root", default="/home/majesty-dump/datasets/NGSM-Main", type=str)
     args = parser.parse_args()
-
+    print(args)
     MAP_DIR = "./train_tools/data_utils/"
 
     print("\n----------- Path Mapping for Labeled Data is Started... -----------\n")
@@ -113,10 +121,10 @@ if __name__ == "__main__":
     map_dict = official_paths_tuning(args.root)
     add_mapping_to_json(map_labeled, map_dict)
 
-    print("\n----------- Path Mapping for Public Data is Started... -----------\n")
-
-    map_public = os.path.join(MAP_DIR, "mapping_public.json")
-    map_dict = public_paths_labeled(args.root)
-    add_mapping_to_json(map_public, map_dict)
+#     print("\n----------- Path Mapping for Public Data is Started... -----------\n")
+# 
+#     map_public = os.path.join(MAP_DIR, "mapping_public.json")
+#     map_dict = public_paths_labeled(args.root)
+#     add_mapping_to_json(map_public, map_dict)
 
     print("\n-------------- Path Mapping is Ended !!! ---------------------------\n")
