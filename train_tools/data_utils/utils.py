@@ -64,6 +64,7 @@ def path_decoder(root, mapping_file, no_label=False, unlabeled=False):
                     {
                         "img": os.path.join(root, elem["img"]),
                         "label": os.path.join(root, elem["label"]),
+                        "class": os.path.join(root, elem["class"])
                     }
                     for elem in data[map_key]
                 ]

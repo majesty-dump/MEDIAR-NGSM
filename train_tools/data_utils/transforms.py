@@ -12,37 +12,37 @@ __all__ = [
 train_transforms = Compose(
     [
         # >>> Load and refine data --- img: (H, W, 3); label: (H, W)
-        CustomLoadImaged(keys=["img", "label"]),
+        CustomLoadImaged(keys=["img", "label", "class"]),
         CustomNormalizeImaged(
             keys=["img"],
             allow_missing_keys=True,
             channel_wise=False,
             percentiles=[0.0, 99.5],
         ),
-        AsChannelFirstd(keys=["img", "label"], channel_dim=-1),
-        RemoveRepeatedChanneld(keys=["label"], repeats=3),  # label: (H, W)
+        AsChannelFirstd(keys=["img", "label", "class"], channel_dim=-1),
+        RemoveRepeatedChanneld(keys=["label", "class"], repeats=3),  # label: (H, W)
         ScaleIntensityd(keys=["img"], allow_missing_keys=True),  # Do not scale label
         # >>> Spatial transforms
         RandZoomd(
-            keys=["img", "label"],
+            keys=["img", "label", "class"],
             prob=0.5,
             min_zoom=0.25,
             max_zoom=1.5,
-            mode=["area", "nearest"],
+            mode=["area", "nearest", "nearest"],
             keep_size=False,
         ),
-        SpatialPadd(keys=["img", "label"], spatial_size=512),
-        RandSpatialCropd(keys=["img", "label"], roi_size=512, random_size=False),
-        RandAxisFlipd(keys=["img", "label"], prob=0.5),
-        RandRotate90d(keys=["img", "label"], prob=0.5, spatial_axes=[0, 1]),
-        IntensityDiversification(keys=["img", "label"], allow_missing_keys=True),
+        SpatialPadd(keys=["img", "label", "class"], spatial_size=512),
+        RandSpatialCropd(keys=["img", "label", "class"], roi_size=512, random_size=False),
+        RandAxisFlipd(keys=["img", "label", "class"], prob=0.5),
+        RandRotate90d(keys=["img", "label", "class"], prob=0.5, spatial_axes=[0, 1]),
+        IntensityDiversification(keys=["img", "label", "class"], allow_missing_keys=True),
         # # >>> Intensity transforms
         RandGaussianNoised(keys=["img"], prob=0.25, mean=0, std=0.1),
         RandAdjustContrastd(keys=["img"], prob=0.25, gamma=(1, 2)),
         RandGaussianSmoothd(keys=["img"], prob=0.25, sigma_x=(1, 2)),
         RandHistogramShiftd(keys=["img"], prob=0.25, num_control_points=3),
         RandGaussianSharpend(keys=["img"], prob=0.25),
-        EnsureTyped(keys=["img", "label"]),
+        EnsureTyped(keys=["img", "label", "class"]),
     ]
 )
 
@@ -72,17 +72,17 @@ public_transforms = Compose(
 
 valid_transforms = Compose(
     [
-        CustomLoadImaged(keys=["img", "label"], allow_missing_keys=True),
+        CustomLoadImaged(keys=["img", "label", "class"], allow_missing_keys=True),
         CustomNormalizeImaged(
             keys=["img"],
             allow_missing_keys=True,
             channel_wise=False,
             percentiles=[0.0, 99.5],
         ),
-        AsChannelFirstd(keys=["img", "label"], allow_missing_keys=True, channel_dim=-1),
-        RemoveRepeatedChanneld(keys=["label"], repeats=3),
+        AsChannelFirstd(keys=["img", "label", "class"], allow_missing_keys=True, channel_dim=-1),
+        RemoveRepeatedChanneld(keys=["label", "class"], repeats=3),
         ScaleIntensityd(keys=["img"], allow_missing_keys=True),
-        EnsureTyped(keys=["img", "label"], allow_missing_keys=True),
+        EnsureTyped(keys=["img", "label", "class"], allow_missing_keys=True),
     ]
 )
 

@@ -47,7 +47,6 @@ def get_dataloaders_labeled(
     # Get list of data dictionaries from decoded paths
     data_dicts = path_decoder(root, mapping_file)
     tuning_dicts = path_decoder(root, mapping_file_tuning, no_label=True)
-
     if amplified:
         with open(DATA_LABEL_DICT_PICKLE_FILE, "rb") as f:
             data_label_dict = pickle.load(f)
