@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import os, sys
 from monai.inferers import sliding_window_inference
+import tifffile as tif
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../")))
 
@@ -87,8 +89,11 @@ class Predictor(BasePredictor):
 
     def _post_process(self, pred_mask):
         """Generate cell instance masks."""
-        dP, cellprob = pred_mask[:2], self._sigmoid(pred_mask[-1])
-        H, W = pred_mask.shape[-2], pred_mask.shape[-1]
+        print(f"mask shape = {pred_mask.shape} ")
+        class_segm_mask = pred_mask[1]
+        tif.imwrite(f'/class_segm/segm_mask-{time.time()}', class_segm_mask, compression="zlib")
+        dP, cellprob = pred_mask[0][:2], self._sigmoid(pred_mask[0][-1])
+        H, W = pred_mask.shape[0][-2], pred_mask.shape[0][-1]
 
         if np.prod(H * W) < (5000 * 5000):
             pred_mask = compute_masks(
