@@ -5,6 +5,7 @@ from monai.inferers import sliding_window_inference
 import tifffile as tif
 import time
 
+from skimage import morphology, measure
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../")))
 
 from core.BasePredictor import BasePredictor
@@ -37,18 +38,74 @@ class Predictor(BasePredictor):
         self.vflip_tta = VerticalFlip()
 
     @torch.no_grad()
+    def conduct_prediction(self):
+        self.model.to(self.device)
+        self.model.eval()
+        total_time = 0
+        total_times = []
+
+        for img_name in self.img_names:
+            img_data = self._get_img_data(img_name)
+            img_data = img_data.to(self.device)
+
+            start = time.time()
+
+            results = self._inference(img_data)
+
+            cell_class_pred_mask = self._post_process_cell_class(results[1].squeeze(0).cpu().numpy())
+        
+            cell_instance_pred_mask = self._post_process_cell_detect(results[0].squeeze(0).cpu().numpy())
+
+
+            self.write_pred_mask(
+                cell_instance_pred_mask, self.output_path, img_name, self.make_submission
+            )
+
+            self.write_pred_mask(
+                cell_class_pred_mask, self.output_path, "class_"+img_name, submission=False
+            )
+
+            end = time.time()
+
+            time_cost = end - start
+            total_times.append(time_cost)
+            total_time += time_cost
+            print(
+                f"Prediction finished: {img_name}; img size = {img_data.shape}; costing: {time_cost:.2f}s"
+            )
+
+        print(f"\n Total Time Cost: {total_time:.2f}s")
+
+        if self.make_submission:
+            fname = "%s.zip" % self.exp_name
+
+            os.makedirs("./submissions", exist_ok=True)
+            submission_path = os.path.join("./submissions", fname)
+
+            with ZipFile(submission_path, "w") as zipObj2:
+                pred_names = sorted(os.listdir(self.output_path))
+                for pred_name in pred_names:
+                    pred_path = os.path.join(self.output_path, pred_name)
+                    zipObj2.write(pred_path)
+
+            print("\n>>>>> Submission file is saved at: %s\n" % submission_path)
+
+        return time_cost
+    
+    @torch.no_grad()
     def _inference(self, img_data):
         """Conduct model prediction"""
 
         img_data = img_data.to(self.device)
         img_base = img_data
-        outputs_base = self._window_inference(img_base)
-        outputs_base = outputs_base.cpu().squeeze()
+        cell_detect_mask, class_segm_mask = self._window_inference(img_base)
+        cell_detect_mask = cell_detect_mask.cpu().squeeze()
+        class_segm_mask = class_segm_mask.cpu().squeeze()
         img_base.cpu()
 
         if not self.use_tta:
-            pred_mask = outputs_base
-            return pred_mask
+            # pred_mask = create_pred_mask(cell_detect_mask, class_segm_mask)
+            return cell_detect_mask, class_segm_mask
 
         else:
             # HorizontalFlip TTA
@@ -77,7 +134,7 @@ class Predictor(BasePredictor):
         """Inference on RoI-sized window"""
         outputs = sliding_window_inference(
             img_data,
-            roi_size=512,
+            roi_size=256,
             sw_batch_size=4,
             predictor=self.model if not aux else self.model_aux,
             padding_mode="constant",
@@ -87,13 +144,21 @@ class Predictor(BasePredictor):
 
         return outputs
 
-    def _post_process(self, pred_mask):
+    def _post_process_cell_class(self, pred_mask):
+        print(f"mask shape = {pred_mask.shape} ")
+
+        pred_mask = torch.from_numpy(pred_mask)
+        pred_mask = torch.softmax(pred_mask, dim=0)
+        pred_mask = torch.argmax(pred_mask, dim=0)
+
+        return pred_mask.numpy().astype('uint32')
+    
+
+    def _post_process_cell_detect(self, pred_mask):
         """Generate cell instance masks."""
         print(f"mask shape = {pred_mask.shape} ")
-        class_segm_mask = pred_mask[1]
-        tif.imwrite(f'/class_segm/segm_mask-{time.time()}', class_segm_mask, compression="zlib")
-        dP, cellprob = pred_mask[0][:2], self._sigmoid(pred_mask[0][-1])
-        H, W = pred_mask.shape[0][-2], pred_mask.shape[0][-1]
+        dP, cellprob = pred_mask[:2], self._sigmoid(pred_mask[-1])
+        H, W = pred_mask.shape[-2], pred_mask.shape[-1]
 
         if np.prod(H * W) < (5000 * 5000):
             pred_mask = compute_masks(
