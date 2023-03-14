@@ -6,6 +6,7 @@ from tqdm import tqdm
 from monai.inferers import sliding_window_inference
 from monai.metrics import CumulativeAverage
 import segmentation_models_pytorch as smp
+from collections import namedtuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../")))
 
@@ -15,6 +16,7 @@ from core.MEDIAR.utils import *
 __all__ = ["Trainer"]
 UNDEFINED_LABEL_INDEX = 4
 BACKGROUND_LABEL_INDEX = 0
+
 
 class Trainer(BaseTrainer):
     def __init__(
@@ -45,10 +47,16 @@ class Trainer(BaseTrainer):
             algo_params,
         )
 
-        self.mse_loss = nn.MSELoss(reduction="mean")
+        # Losses 
+        
         self.bce_loss = nn.BCEWithLogitsLoss(reduction="mean")
+        self.mse_loss = nn.MSELoss(reduction="mean")
         self.dice_loss = smp.losses.DiceLoss(mode="multiclass", from_logits=True, ignore_index=0)
 
+        self.MediarLoss = namedtuple('MediarLoss', ['bce_loss', 'mse_loss', 'dice_loss'])
+
+        # Metrics
+        self.loss_metric = CumulativeAverage()
         self.mse_loss_metric = CumulativeAverage()
         self.bce_loss_metric = CumulativeAverage()
         self.class_segm_metric = CumulativeAverage()
@@ -61,12 +69,13 @@ class Trainer(BaseTrainer):
             outputs[0][:, -1],
             torch.from_numpy(labels_onehot_flows[:, 1] > 0.5).to(self.device).float(),
         )
-
         # Cell Distinction Loss
         gradient_flows = torch.from_numpy(labels_onehot_flows[:, 2:]).to(self.device)
+        
         gradflow_loss = 0.5 * self.mse_loss(outputs[0][:, :2], 5.0 * gradient_flows)
         class_segm_loss = self.dice_loss(outputs[1], class_labels.long())
-        return cellprob_loss, gradflow_loss, class_segm_loss
+
+        return self.MediarLoss(cellprob_loss, gradflow_loss, class_segm_loss)
 
     def _epoch_phase(self, phase):
         phase_results = {}
@@ -111,17 +120,19 @@ class Trainer(BaseTrainer):
                         labels, use_gpu=True, device=self.device
                     )
                     # Calculate loss
-                    bce, mse, dl = self.mediar_criterion(outputs, labels_onehot_flows, class_labels)
-                    loss = bce+mse+dl
-                    self.bce_loss_metric.append(bce)
-                    self.mse_loss_metric.append(mse)
-                    self.class_segm_metric.append(dl)
-                    self.loss_metric.append(loss)
+                    mediar_loss = self.mediar_criterion(outputs, labels_onehot_flows, class_labels)
 
+                    self.bce_loss_metric.append(mediar_loss.bce_loss)
+                    self.mse_loss_metric.append(mediar_loss.mse_loss)
+                    self.class_segm_metric.append(mediar_loss.dice_loss)
+
+                    loss = sum(mediar_loss)
+                    self.loss_metric.append(loss)
                     # Calculate valid statistics
                     if phase != "train":
+                        # TODO: make a separate metric for class segemntation head  
                         outputs, labels = self._post_process(outputs[0], labels)
-                        f1_score = self._get_f1_metric(outputs[0], labels)
+                        f1_score = self._get_f1_metric(outputs, labels)
                         self.f1_metric.append(f1_score)
 
                 # Backward pass
@@ -139,13 +150,13 @@ class Trainer(BaseTrainer):
 
         # Update metrics
         phase_results = self._update_results(phase_results, 
-            self.mse_loss_metric, "bce", phase)
+            self.bce_loss_metric, "bce", phase)
 
         phase_results = self._update_results(phase_results, 
             self.mse_loss_metric, "mse", phase)
 
         phase_results = self._update_results(phase_results, 
-            self.mse_loss_metric, "dl", phase)
+            self.class_segm_metric, "class dl", phase)
 
         phase_results = self._update_results(phase_results, 
             self.loss_metric, "loss", phase)
