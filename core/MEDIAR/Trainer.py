@@ -51,7 +51,7 @@ class Trainer(BaseTrainer):
         
         self.bce_loss = nn.BCEWithLogitsLoss(reduction="mean")
         self.mse_loss = nn.MSELoss(reduction="mean")
-        self.dice_loss = smp.losses.DiceLoss(mode="multiclass", from_logits=True, ignore_index=4)
+        self.dice_loss = smp.losses.DiceLoss(mode="multiclass", from_logits=True, ignore_index=UNDEFINED_LABEL_INDEX)
 
         self.MediarLoss = namedtuple('MediarLoss', ['bce_loss', 'mse_loss', 'dice_loss'])
 
